@@ -38,7 +38,8 @@ Ao carregar a página, ele:
 
 1. Extrai o **ID do curso** da URL (`/courses/<ID>/...`).
 2. Injeta um **painel flutuante** no canto inferior direito.
-3. Se o autopilot estiver ativo (`localStorage: tic_autopilot_status = "on"`), executa o `boot()` e decide o que fazer conforme a página atual.
+3. Semeia as chaves vindas do build (`.env`) no `localStorage`, **somente se** ainda não houver uma chave salva pelo painel.
+4. Se o autopilot estiver ativo (`localStorage: tic_autopilot_status = "on"`), executa o `boot()` e decide o que fazer conforme a página atual.
 
 O objetivo é percorrer a fila de itens pendentes do curso: **quizzes** e **assignments** são visitados e resolvidos; **páginas** são marcadas como concluídas via API; ao final, o script clica em "Próximo" até encontrar a tela de certificado, onde para.
 
@@ -81,46 +82,187 @@ Não é necessária nenhuma permissão especial (`@grant none`). O script usa as
 
 ### Estrutura do repositório
 
-```
-.
-├── tic-autopilot.user.js   # fonte do userscript (sem chaves)
-├── build.mjs               # lê o .env e gera dist/
-├── .env.example            # modelo das variáveis (versionado)
-├── .env                    # seus segredos (ignorado pelo Git)
-├── package.json            # atalho `npm run build` (sem dependências)
-├── dist/                   # build gerado (ignorado pelo Git)
-└── README.md
-```
+| Arquivo | Vai para o Git? | Papel |
+| --- | --- | --- |
+| `tic-autopilot.user.js` | Sim | Fonte do userscript. Funciona sem build, mas sem chaves padrão. |
+| `build.mjs` | Sim | Lê o `.env`, injeta no bloco `<ENV>` e gera o `dist/`. |
+| `.env.example` | Sim | Modelo comentado de todas as variáveis. |
+| `.env` | **Não** | Suas chaves e parâmetros reais. Criado por você a partir do exemplo. |
+| `dist/tic-autopilot.user.js` | **Não** | Build final com as chaves injetadas. É o arquivo que vai para o Tampermonkey. |
+| `package.json` | Sim | Atalho `npm run build`; não possui dependências. |
+| `README.md` | Sim | Esta documentação. |
 
 ---
 
 ## Configuração via `.env`
 
-O navegador — e o Tampermonkey — **não lê `.env` em tempo de execução**. Por isso existe um passo de build: `build.mjs` lê o `.env`, substitui o bloco `<ENV>` do fonte e gera `dist/tic-autopilot.user.js`.
+### Por que existe um passo de build
 
-```bash
-cp .env.example .env
-# edite o .env com suas chaves
-node build.mjs
+Userscripts executam dentro do navegador. Eles **não conseguem abrir um arquivo `.env` do disco**, e o Tampermonkey também não lê variáveis de ambiente. Para o script usar uma chave, ela precisa estar dentro do próprio código instalado (ou no `localStorage`).
+
+O projeto resolve isso com um build local:
+
+```
+.env  ──►  build.mjs  ──►  dist/tic-autopilot.user.js  ──►  Tampermonkey
+(local)    (injeta)        (arquivo instalável)             (executa)
+             ▲
+             └── tic-autopilot.user.js (fonte, sem segredos)
 ```
 
-| Variável | Padrão | Descrição |
-| --- | --- | --- |
-| `TIC_NVIDIA_API_KEY` | vazio | Chave NVIDIA (`nvapi-...`) |
-| `TIC_GROQ_API_KEY` | vazio | Chave Groq (`gsk_...`) |
-| `TIC_OPENROUTER_API_KEY` | vazio | Chave OpenRouter (`sk-or-...`) |
-| `TIC_MIN_SCORE` | `6` | Nota mínima para aprovar (0–10) |
-| `TIC_DELAY_QUIZ` | `1800` | Espera antes de enviar o quiz (ms) |
-| `TIC_TIMEOUT` | `12000` | Timeout por tentativa de IA (ms) |
-| `TIC_OPENROUTER_REFERER` | `https://ticemtrilhas.instructure.com` | Header `HTTP-Referer` do OpenRouter |
+- O **fonte** `tic-autopilot.user.js` fica no Git e não contém chaves.
+- O **build** lê o `.env`, substitui o bloco `<ENV>` e grava `dist/tic-autopilot.user.js`.
+- O **dist** é o arquivo que você instala. Ele contém as chaves e por isso **não vai para o Git**.
 
-Regras de precedência e segurança:
+A lógica do autopilot não mudou: apenas a origem das chaves e dos parâmetros passou a ser o `.env` (com o painel ainda funcionando como antes).
+
+### Passo a passo
+
+1. Copie o modelo:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Abra o `.env` e preencha pelo menos uma chave. Exemplo:
+
+   ```env
+   TIC_NVIDIA_API_KEY=nvapi-xxxxxxxxxxxxxxxxxxxxxxxx
+   TIC_GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxxxx
+   TIC_OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxx
+   TIC_MIN_SCORE=6
+   TIC_DELAY_QUIZ=1800
+   TIC_TIMEOUT=12000
+   TIC_OPENROUTER_REFERER=https://ticemtrilhas.instructure.com
+   ```
+
+   Os valores acima são fictícios. Use chaves reais apenas no seu `.env` local.
+
+3. Gere o arquivo final:
+
+   ```bash
+   node build.mjs
+   # ou
+   npm run build
+   ```
+
+   Saída esperada:
+
+   ```
+   ✔ Gerado: dist/tic-autopilot.user.js
+   ```
+
+   Se nenhuma chave estiver preenchida, o build avisa:
+
+   ```
+   ⚠ Sem chave padrão para: NVIDIA_KEY, GROQ_KEY, OPENROUTER_KEY (preencha o .env ou use o painel ⚙️).
+   ```
+
+4. Instale o **`dist/tic-autopilot.user.js`** no Tampermonkey (crie um script novo e cole o conteúdo, ou reinstale o arquivo).
+5. Recarregue a página do curso.
+
+### Referência das variáveis
+
+| Variável | Padrão | Descrição | Exige rebuild? |
+| --- | --- | --- | --- |
+| `TIC_NVIDIA_API_KEY` | vazio | Chave NVIDIA (`nvapi-...`) | Sim para virar padrão; o painel pode sobrescrever |
+| `TIC_GROQ_API_KEY` | vazio | Chave Groq (`gsk_...`) | Sim para virar padrão; o painel pode sobrescrever |
+| `TIC_OPENROUTER_API_KEY` | vazio | Chave OpenRouter (`sk-or-...`) | Sim para virar padrão; o painel pode sobrescrever |
+| `TIC_MIN_SCORE` | `6` | Nota mínima para aprovar (0–10) | Sim |
+| `TIC_DELAY_QUIZ` | `1800` | Espera antes de enviar o quiz (ms) | Sim |
+| `TIC_TIMEOUT` | `12000` | Timeout por tentativa de IA (ms) | Sim |
+| `TIC_OPENROUTER_REFERER` | `https://ticemtrilhas.instructure.com` | Header `HTTP-Referer` enviado ao OpenRouter | Sim |
+
+### Como o valor chega ao código
+
+O `build.mjs` localiza este bloco no fonte:
+
+```js
+// <ENV>
+const ENV = {
+    NVIDIA_KEY: '',
+    GROQ_KEY: '',
+    OPENROUTER_KEY: '',
+    MIN_SCORE: '6',
+    DELAY_QUIZ: '1800',
+    TIMEOUT: '12000',
+    OPENROUTER_REFERER: 'https://ticemtrilhas.instructure.com'
+};
+// </ENV>
+```
+
+e o substitui pelos valores do `.env`:
+
+```js
+// <ENV>
+const ENV = {
+    NVIDIA_KEY: "nvapi-...",
+    GROQ_KEY: "gsk_...",
+    OPENROUTER_KEY: "sk-or-...",
+    MIN_SCORE: "6",
+    DELAY_QUIZ: "1800",
+    TIMEOUT: "12000",
+    OPENROUTER_REFERER: "https://ticemtrilhas.instructure.com"
+};
+// </ENV>
+```
+
+No carregamento, `seedEnvKey()` copia as chaves para o `localStorage` **apenas quando ainda não existe uma chave salva**:
+
+```js
+const seedEnvKey = (storageKey, value) => {
+    if (value && !localStorage.getItem(storageKey)) {
+        localStorage.setItem(storageKey, value);
+    }
+};
+
+seedEnvKey(CONFIG.NVIDIA_KEY, ENV.NVIDIA_KEY);
+seedEnvKey(CONFIG.GROQ_KEY, ENV.GROQ_KEY);
+seedEnvKey(CONFIG.OPENROUTER_KEY, ENV.OPENROUTER_KEY);
+```
+
+Depois disso, o restante do código continua igual: todas as chamadas de IA leem a chave do `localStorage`, como já faziam antes.
+
+### Precedência das chaves
+
+| Cenário | Chave usada |
+| --- | --- |
+| Painel preenchido + `.env` preenchido | **Painel** (`localStorage`) |
+| Painel vazio + `.env` preenchido | **`.env`** (semeada no carregamento) |
+| Painel preenchido + `.env` vazio | **Painel** |
+| Nenhum dos dois | Nenhuma — o painel pede uma chave |
+
+> Se você apagar uma chave pelo painel, ela sai do `localStorage`. No próximo recarregamento, se o `.env` ainda tiver essa chave, ela volta a ser semeada. Para removê-la de vez, apague do `.env` e rode o build novamente.
+
+### Chaves x parâmetros
+
+- **Chaves de API**: podem ser trocadas pelo painel ⚙️ sem rebuild. O `.env` define o valor inicial.
+- **Parâmetros** (`TIC_MIN_SCORE`, `TIC_DELAY_QUIZ`, `TIC_TIMEOUT`, `TIC_OPENROUTER_REFERER`): não têm interface no painel; só mudam com rebuild.
+
+### Atualizar configurações
+
+| O que mudar | Como fazer |
+| --- | --- |
+| Chave de API (rápido) | Painel ⚙️ → **Salvar Chaves** |
+| Chave de API (padrão do build) | Editar `.env` → `node build.mjs` → reinstalar o `dist/` |
+| Nota mínima, delays ou timeout | Editar `.env` → `node build.mjs` → reinstalar o `dist/` |
+| Listas de modelos | Editar `CONFIG.*_MODELS` no fonte → `node build.mjs` → reinstalar o `dist/` |
+
+### Segurança
 
 - O `.env` é **ignorado pelo Git**; apenas `.env.example` é versionado.
-- Chaves do `.env` são copiadas para o `localStorage` **somente se** ainda não houver uma chave salva pelo painel. O painel **⚙️ tem prioridade**.
-- Se alterar o `.env`, rode o build de novo e reinstale o `dist/` no Tampermonkey.
-- O build aborta se detectar algo parecido com chave hardcoded no fonte (`nvapi-`, `gsk_`, `sk-or-`).
-- O `dist/` contém as chaves injetadas: trate-o como segredo e não o commite.
+- O `dist/` também é ignorado, mas **contém as chaves em texto puro**. Trate-o como segredo: não envie, não anexe e não publique.
+- O build aborta se detectar padrão de chave hardcoded no fonte (`nvapi-`, `gsk_`, `sk-or-`).
+- O Tampermonkey guarda o script instalado. Quem tiver acesso ao perfil do navegador pode ler as chaves.
+- Se uma chave vazar, **revogue no provedor e gere outra**. Apenas trocar o `.env` não invalida a chave antiga.
+- O aviso de uso responsável no topo deste README continua valendo.
+
+### Verificar o resultado
+
+```bash
+node --check dist/tic-autopilot.user.js   # confere a sintaxe
+```
+
+O build também imprime um aviso quando alguma chave ficou vazia, o que ajuda a detectar `.env` incompleto.
 
 ---
 
@@ -409,6 +551,20 @@ Os valores de `ENV` vêm do bloco `<ENV>` injetado por `build.mjs`. No fonte, fi
 **A chave do `.env` não aparece no painel**
 - Uma chave salva anteriormente pelo painel tem prioridade. Limpe a chave (salve o campo vazio) e recarregue a página.
 
+**Alterei o `.env`, mas o script usa outra chave**
+- Gere o `dist/` de novo (`node build.mjs`) e reinstale no Tampermonkey.
+- Se o painel tiver uma chave salva, ela vence o `.env`. Salve o campo vazio, recarregue e a chave do `.env` volta a ser semeada.
+
+**O painel já abre com a chave do `.env`**
+- Comportamento esperado: o build semeia o `localStorage` na primeira carga, e o campo do painel lê esse valor.
+
+**Quero usar sem `.env`**
+- Instale `tic-autopilot.user.js` diretamente e informe as chaves pelo painel. O fonte é funcional e não contém chaves.
+
+**O build não gera o `dist/`**
+- Confira se o Node.js está instalado (`node --version`) e se o comando foi rodado na raiz do projeto.
+- Verifique se o `.env` existe e se os marcadores `<ENV>` continuam no fonte.
+
 **"Insira pelo menos 1 chave de IA"**
 - Abra o ⚙️ e salve ao menos uma chave válida (ou preencha o `.env` e rode o build).
 
@@ -440,6 +596,7 @@ Os valores de `ENV` vêm do bloco `<ENV>` injetado por `build.mjs`. No fonte, fi
 - A fila em `sessionStorage` não é compartilhada entre abas nem sobrevive ao fechamento da aba.
 - As chaves ficam em texto puro no `localStorage` **e no `dist/` gerado**; evite usar em computadores compartilhados e nunca commite `.env` ou `dist/`.
 - Como o usuário precisa colar o script no Tampermonkey, o build com `.env` embute as chaves no arquivo instalado — isso não adiciona proteção contra quem tem acesso ao navegador.
+- Sem rodar o build, o fonte não possui chaves padrão; nesse caso, informe-as pelo painel ⚙️.
 - O uso de IA de terceiros pode gerar custos e está sujeito aos limites de cada provedor.
 
 ---
