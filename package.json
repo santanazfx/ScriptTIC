@@ -1,0 +1,10 @@
+{
+  "name": "scripttic",
+  "version": "17.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Userscript TIC em Trilhas - Autopilot v17.0",
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}

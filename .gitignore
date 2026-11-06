@@ -1,0 +1,8 @@
+# Dependências e artefatos de build
+node_modules/
+dist/
+
+# Segredos locais
+.env
+.env.*
+!.env.example

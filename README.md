@@ -2,7 +2,9 @@
 
 **TIC em Trilhas — Autopilot v17.0** é um userscript para Tampermonkey que percorre automaticamente as trilhas de um curso no Canvas (TIC em Trilhas), responde quizzes com apoio de IA e avança até a tela de certificado.
 
-> ⚠️ **Aviso:** este projeto automatiza a resolução de atividades avaliativas. Use apenas em cursos/ambientes em que isso seja permitido. O uso pode violar os Termos de Uso da plataforma e as regras da instituição. As chaves de API ficam salvas no `localStorage` do navegador — não compartilhe o script com suas chaves preenchidas.
+As chaves de API e parâmetros sensíveis ficam em um **`.env` local**, injetado no momento do build. O código-fonte não contém segredos.
+
+> ⚠️ **Aviso:** este projeto automatiza a resolução de atividades avaliativas. Use apenas em cursos/ambientes em que isso seja permitido. O uso pode violar os Termos de Uso da plataforma e as regras da instituição. **Nunca** commite o `.env` nem o `dist/` — ambos são ignorados pelo Git.
 
 ---
 
@@ -10,6 +12,7 @@
 
 - [Como funciona](#como-funciona)
 - [Instalação](#instalação)
+- [Configuração via `.env`](#configuração-via-env)
 - [Configuração das chaves de IA](#configuração-das-chaves-de-ia)
 - [Uso](#uso)
 - [Fluxo de execução](#fluxo-de-execução)
@@ -54,19 +57,79 @@ O objetivo é percorrer a fila de itens pendentes do curso: **quizzes** e **assi
 ## Instalação
 
 1. Instale a extensão **[Tampermonkey](https://www.tampermonkey.net/)** no seu navegador.
-2. Abra o dashboard do Tampermonkey → **Criar novo script**.
-3. Apague o conteúdo padrão e cole o script completo (`@name TIC em Trilhas - Autopilot v17.0`).
-4. Salve (`Ctrl+S`).
-5. Acesse qualquer página de curso em `https://ticemtrilhas.instructure.com/courses/<ID>/...`.
-6. O painel **🎓 Autopilot v17.0** aparecerá no canto inferior direito.
+2. Escolha uma das opções abaixo para obter o userscript.
+3. No dashboard do Tampermonkey: **Criar novo script** → apague o conteúdo padrão → cole o script → salve (`Ctrl+S`).
+4. Acesse qualquer página de curso em `https://ticemtrilhas.instructure.com/courses/<ID>/...`.
+5. O painel **🎓 Autopilot v17.0** aparecerá no canto inferior direito.
+
+### Opção A — build com `.env` (recomendado)
+
+```bash
+git clone https://github.com/santanazfx/ScriptTIC.git
+cd ScriptTIC
+cp .env.example .env      # preencha as chaves
+node build.mjs            # ou: npm run build
+```
+
+Instale no Tampermonkey o arquivo gerado **`dist/tic-autopilot.user.js`**. As chaves do `.env` entram no build e passam a ser o padrão.
+
+### Opção B — sem build
+
+Instale o arquivo **`tic-autopilot.user.js`** diretamente e informe as chaves pelo painel **⚙️**. O fonte é válido e funcional, mas não contém nenhuma chave.
 
 Não é necessária nenhuma permissão especial (`@grant none`). O script usa as credenciais da própria sessão do Canvas para chamar a API do curso.
+
+### Estrutura do repositório
+
+```
+.
+├── tic-autopilot.user.js   # fonte do userscript (sem chaves)
+├── build.mjs               # lê o .env e gera dist/
+├── .env.example            # modelo das variáveis (versionado)
+├── .env                    # seus segredos (ignorado pelo Git)
+├── package.json            # atalho `npm run build` (sem dependências)
+├── dist/                   # build gerado (ignorado pelo Git)
+└── README.md
+```
+
+---
+
+## Configuração via `.env`
+
+O navegador — e o Tampermonkey — **não lê `.env` em tempo de execução**. Por isso existe um passo de build: `build.mjs` lê o `.env`, substitui o bloco `<ENV>` do fonte e gera `dist/tic-autopilot.user.js`.
+
+```bash
+cp .env.example .env
+# edite o .env com suas chaves
+node build.mjs
+```
+
+| Variável | Padrão | Descrição |
+| --- | --- | --- |
+| `TIC_NVIDIA_API_KEY` | vazio | Chave NVIDIA (`nvapi-...`) |
+| `TIC_GROQ_API_KEY` | vazio | Chave Groq (`gsk_...`) |
+| `TIC_OPENROUTER_API_KEY` | vazio | Chave OpenRouter (`sk-or-...`) |
+| `TIC_MIN_SCORE` | `6` | Nota mínima para aprovar (0–10) |
+| `TIC_DELAY_QUIZ` | `1800` | Espera antes de enviar o quiz (ms) |
+| `TIC_TIMEOUT` | `12000` | Timeout por tentativa de IA (ms) |
+| `TIC_OPENROUTER_REFERER` | `https://ticemtrilhas.instructure.com` | Header `HTTP-Referer` do OpenRouter |
+
+Regras de precedência e segurança:
+
+- O `.env` é **ignorado pelo Git**; apenas `.env.example` é versionado.
+- Chaves do `.env` são copiadas para o `localStorage` **somente se** ainda não houver uma chave salva pelo painel. O painel **⚙️ tem prioridade**.
+- Se alterar o `.env`, rode o build de novo e reinstale o `dist/` no Tampermonkey.
+- O build aborta se detectar algo parecido com chave hardcoded no fonte (`nvapi-`, `gsk_`, `sk-or-`).
+- O `dist/` contém as chaves injetadas: trate-o como segredo e não o commite.
 
 ---
 
 ## Configuração das chaves de IA
 
-O script não possui chaves embutidas. Você precisa de **pelo menos uma** chave:
+Você precisa de **pelo menos uma** chave, informada de uma destas formas:
+
+- **`.env` + build** (vira padrão inicial — veja acima);
+- **painel ⚙️** (salva no `localStorage` e tem prioridade sobre o `.env`).
 
 | Provedor | Onde obter | Prefixo esperado |
 | --- | --- | --- |
@@ -279,6 +342,8 @@ O script também neutraliza diálogos nativos (`confirm`, `alert`, `prompt`) par
 | `tic_target_queue_<courseId>` | Fila de itens pendentes |
 | `tic_skipped_quizzes` | IDs de quizzes/assignments pulados manualmente |
 
+> Ao carregar o script, as chaves definidas no `.env` são copiadas para o `localStorage` **somente se** ainda não existir uma chave salva pelo painel. Depois disso, o comportamento é idêntico ao de uma chave digitada manualmente.
+
 Para "resetar" completamente o script: pause o autopilot e limpe essas chaves no console do navegador (F12).
 
 ```js
@@ -293,6 +358,8 @@ Object.keys(localStorage)
 
 | Função | Responsabilidade |
 | --- | --- |
+| `ENV` | Valores injetados pelo build a partir do `.env` |
+| `seedEnvKey()` | Copia chaves do `.env` para o `localStorage` sem sobrescrever o painel |
 | `createUI()` | Cria o painel flutuante e liga os botões |
 | `setStatus(state, msg)` | Atualiza indicador de estado e mensagem |
 | `stopAutopilot()` | Desliga, limpa a fila e reseta o botão |
@@ -316,11 +383,13 @@ Object.keys(localStorage)
 
 ```js
 const CONFIG = {
-    MIN_SCORE: 6,        // nota mínima para aprovar
-    DELAY_QUIZ: 1800,    // ms antes de enviar o quiz
-    TIMEOUT: 12000       // ms por tentativa de IA
+    MIN_SCORE: Number(ENV.MIN_SCORE) || 6,       // nota mínima para aprovar
+    DELAY_QUIZ: Number(ENV.DELAY_QUIZ) || 1800,  // ms antes de enviar o quiz
+    TIMEOUT: Number(ENV.TIMEOUT) || 12000        // ms por tentativa de IA
 };
 ```
+
+Os valores de `ENV` vêm do bloco `<ENV>` injetado por `build.mjs`. No fonte, ficam os padrões acima; a versão compilada traz os valores do seu `.env`.
 
 ---
 
@@ -331,8 +400,17 @@ const CONFIG = {
 - Verifique se o Tampermonkey está ativo e o script habilitado.
 - Recarregue a página.
 
+**Build falha com ".env não encontrado"**
+- Rode `cp .env.example .env` na raiz do projeto e preencha as chaves.
+
+**Build avisa que não há chave padrão**
+- É apenas um aviso. Preencha as variáveis `TIC_*_API_KEY` no `.env` ou informe as chaves pelo painel ⚙️.
+
+**A chave do `.env` não aparece no painel**
+- Uma chave salva anteriormente pelo painel tem prioridade. Limpe a chave (salve o campo vazio) e recarregue a página.
+
 **"Insira pelo menos 1 chave de IA"**
-- Abra o ⚙️ e salve ao menos uma chave válida.
+- Abra o ⚙️ e salve ao menos uma chave válida (ou preencha o `.env` e rode o build).
 
 **"Todas as IAs ativas falharam"**
 - Verifique saldo/limite do provedor (erros `429` são comuns em planos gratuitos).
@@ -360,7 +438,8 @@ const CONFIG = {
 - Não resolve questões dissertativas longas, envio de arquivos ou tarefas externas.
 - Não baixa o certificado — apenas detecta a tela e encerra.
 - A fila em `sessionStorage` não é compartilhada entre abas nem sobrevive ao fechamento da aba.
-- As chaves ficam em texto puro no `localStorage`; evite usar em computadores compartilhados.
+- As chaves ficam em texto puro no `localStorage` **e no `dist/` gerado**; evite usar em computadores compartilhados e nunca commite `.env` ou `dist/`.
+- Como o usuário precisa colar o script no Tampermonkey, o build com `.env` embute as chaves no arquivo instalado — isso não adiciona proteção contra quem tem acesso ao navegador.
 - O uso de IA de terceiros pode gerar custos e está sujeito aos limites de cada provedor.
 
 ---
